@@ -1,9 +1,12 @@
 // Copyright 2020 Bykovskaya Alina
-#include "../../../modules/task_1/bykovskaya_a_simpson_method/simpson_method.h"
+#include "../../../modules/task_4/bykovskaya_a_simpson_method/simpson_method.h"
 #include <thread>
+#include <atomic>
 #include <vector>
 #include <functional>
 #include <utility>
+
+static const int countThreads = 2;
 
 double calcIntegral(const std::vector<std::pair<double, double>>& scope,
         std::function<double(const std::vector<double>)> f, size_t accurancy,
@@ -28,15 +31,18 @@ double calcIntegral(const std::vector<std::pair<double, double>>& scope,
             func_res[i] =  calcIntegral(scope, f, accurancy, level + 1, fix_var);
         }
     }
-    double res = func_res[0] + func_res[2 * accurancy - 1];
-
-
-    for (size_t i = 0; i < 2 * accurancy - 1; ++i) {
-        if (i % 2 == 1) {
-            res += 4 * func_res[i];
-        } else {
-            res += 2 * func_res[i];
-        }
+    std::atomic<double> res = func_res[0] + func_res[2 * accurancy - 1];
+    std::thread for_thrds[countThreads];
+    for (int j = 0; j < countThreads; ++j) {
+        for_thrds[j] = std::thread([&](){
+            for (size_t i = 0; i < 2 * accurancy - 1; ++i) {
+                if (i % 2 == 1) {
+                    res = res + 4 * func_res[i];
+                } else {
+                    res = res + 2 * func_res[i];
+                }
+            }
+        });
     }
     // for (size_t i = 1; i < 2 * accurancy - 1; i += 2)
     //     res += 4 * func_res[i];
