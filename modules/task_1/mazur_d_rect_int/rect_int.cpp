@@ -2,9 +2,11 @@
 #include <vector>
 #include <numeric>
 #include <utility>
+#include <iostream>
 #include "../../../modules/task_1/mazur_d_rect_int/rect_int.h"
 
-double rectIntSequen(double (*f)(std::vector<double>), std::vector <std::pair<double, double>> cord, int cuts) {
+double rectIntSequen(const std::function<double(const std::vector<double>&)>& f,
+                     std::vector <std::pair<double, double>> cord, int cuts) {
   int  blockCount = 1;
   int vSize = cord.size();
   std::vector<double> blockSize(vSize);
@@ -25,3 +27,4 @@ double rectIntSequen(double (*f)(std::vector<double>), std::vector <std::pair<do
   }
   return intResult;
 }
+

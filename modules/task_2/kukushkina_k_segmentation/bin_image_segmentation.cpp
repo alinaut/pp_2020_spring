@@ -6,11 +6,11 @@
 #include <ctime>
 #include <iostream>
 
-static int offset = 0;
+static std::size_t offset = 0;
 
-std::vector<int> Generate_pic(std::size_t w, std::size_t h) {
+std::vector<std::size_t> Generate_pic(std::size_t w, std::size_t h) {
   if (h <= 0 || w <= 0) throw "Trying to generate negative-dim pic";
-  std::vector<int> pic(h * w);
+  std::vector<std::size_t> pic(h * w);
   std::mt19937 gen;
   gen.seed(static_cast<unsigned>(time(0)) + offset++);
   #pragma omp parallel for
@@ -20,69 +20,85 @@ std::vector<int> Generate_pic(std::size_t w, std::size_t h) {
   return pic;
 }
 
-std::vector<int> Segmentation(const std::vector<int> &source, std::size_t w) {
-  std::vector<int> res;
-  std::vector<int> segStart;  // first line of segment, for non-recursive recoloring
-  segStart.push_back(-1);  // start of 0 seg
-  segStart.push_back(-1);  // start of 1 seg
-  for (size_t i = 0; i < source.size(); i++) {
-    res.push_back(source[i]);
-  }
-  int color = 1;
-  if (res[0] == 1) {
-    res[0] = ++color;
-    segStart.push_back(0);
-  }
-  for (size_t i = 1; i < w; i++) {  // first line segmentation
-    if (res[i] == 0) continue;  // empty space skipping
-    if (res[i - 1] != 0) {
-      res[i] = res[i - 1];
-    } else {
-      res[i] = ++color;  // new segment starting
-      segStart.push_back(0);
+std::vector<std::size_t> Segmentation(const std::vector<std::size_t> &source, std::size_t w) {
+  std::vector<std::size_t> res(source);
+  std::vector<std::size_t> tnc;
+  tnc.push_back(0);
+  tnc.push_back(1);
+  std::size_t color = 1;
+
+  //  Segmentation
+  if (res[0] == 1) {  // first elem
+    #pragma omp critical(segment)
+    {
+      color++;
+      res[0] = color;
+      tnc.push_back(color);
     }
   }
-  #pragma omp parallel for
-  for (int i = w; i < static_cast<int>(res.size()); i++) {
-    if (res[i] == 0) continue;  // empty space skipping
-    if (i % w == 0) {  // left edge segmentation
-      if (res[i - w] != 0) {
-        res[i] = res[i - w];  // adding to existing segment
-      } else {
-        #pragma omp critical(new_segment)
-        {
-          res[i] = ++color;  // new segment starting
-          segStart.push_back(i / w);
-        }
-      }
-    } else if (res[i - 1] == 0 && res[i - w] == 0) {
-      #pragma omp critical(new_segment)
+
+  for (std::size_t i = 1; i < w; i++) {  // first row
+    if (res[i] == 0)  // empty cell
+      continue;
+    if (res[i - 1] == 0 || i % w == 0) {  // new seg
+  #pragma omp critical(segment)
       {
-        res[i] = ++color;  // new segment starting
-        segStart.push_back(i / w);
+        color++;
+        res[i] = color;
+        tnc.push_back(color);
       }
-    } else if (res[i - 1] != 0 && res[i - w] == 0) {
-      res[i] = res[i - 1];  // adding to left segment
-    } else if (res[i - 1] == 0 && res[i - w] != 0) {
-      res[i] = res[i - w];  // adding to upper segment
-    } else if (res[i - 1] != 0 && res[i - w] != 0) {
-      res[i] = res[i - 1];  // adding to left segment
-      if (res[i - w] != res[i - 1]) {  // recoloring upper segment
-        int oldColor = res[i - w];
-        int newColor = res[i - 1];
-        if (segStart[oldColor] < segStart[newColor])
-          segStart[newColor] = segStart[oldColor];  // refreshing current seg start
-        for (int j = static_cast<int>(w * segStart[oldColor]); j < i; j++) {
-          if (res[j] == oldColor)
-            res[j] = newColor;
-        }
+      continue;
+    }
+    res[i] = res[i - 1];
+  }
+
+  #pragma omp parallel for schedule(dynamic, w)
+  for (int i = w; i < static_cast<int>(res.size()); i++) {  // other rows
+    if (res[i] == 0)  // empty cell
+      continue;
+    if ((res[i - 1] < 2  || i % w == 0) && res[i - w] < 2) {  // new seg
+    #pragma omp critical(segment)
+      {
+        color++;
+        res[i] = color;
+        tnc.push_back(color);
       }
+      continue;
+    }
+    if (res[i - 1] < 2) {  // only upper is colored
+      res[i] = res[i - w];
+      continue;
+    }
+    if (res[i - w] < 2) {  // only left is colored
+      res[i] = res[i - 1];
+      continue;
+    }
+    // both upper & left are colored
+    std::size_t leftcolor = res[i - 1];
+    res[i] = leftcolor;
+  }
+
+  // Recoloring preprocessing
+  for (std::size_t i = w; i < res.size(); i++) {
+    if (res[i] == 0 || res[i - w] == 0)
+      continue;
+    std::size_t cur = tnc[res[i]];
+    std::size_t up = tnc[res[i - w]];
+    for (std::size_t j = 2; j < tnc.size(); j++) {
+      if (tnc[j] == cur)
+        tnc[j] = up;
     }
   }
+
+  // Recoloring
+  #pragma omp parallel for
+  for (int i = 0; i < static_cast<int>(res.size()); i++)
+    res[i] = tnc[res[i]];
+
   return res;
 }
 
-void Output(const std::vector<int>& source, std::size_t w) {
+void Output(const std::vector<std::size_t>& source, std::size_t w) {
   for (size_t i = 0; i < source.size(); i++) {
     if (i % w == 0)
       std::cout << std::endl;
